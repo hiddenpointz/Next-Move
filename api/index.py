@@ -268,7 +268,7 @@ def index():
             history.append(result.omega_dyn)
     labels = [f"Step {i+1}" for i in range(len(history))]
     return render_template_string(TEMPLATE, result=result, history=history,
-                                  labels=labels, indicators=asdict(result) if result else None)
+                                  labels=labels, indicators=asdict(result) if result else None
+                                 )
 
-if __name__=="__main__":
-    app.run(debug=True)
+
