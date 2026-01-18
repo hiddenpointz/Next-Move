@@ -1,5 +1,5 @@
 from flask import Flask, request, render_template_string
-import math, re, requests, os
+import math, re, os, asyncio, aiohttp
 from dataclasses import dataclass, asdict
 import openai
 
@@ -42,6 +42,7 @@ class UnifiedUEDPEngine:
         self.omega_ref = omega_ref
         self.omega_crit = 0.368
         self.turn = 0
+        # Let OpenAI SDK handle key itself
         self.openai_key = os.getenv("OPENAI_API_KEY")
         if self.openai_key:
             openai.api_key = self.openai_key
@@ -68,48 +69,48 @@ class UnifiedUEDPEngine:
             domains.append("wiki")
         return domains
 
-    # Fetch Market
-    def fetch_alpha_vantage(self, symbol="IBM"):
+    # ---------------- ASYNC FETCHES ----------------
+    async def fetch_alpha_vantage(self, session, symbol="IBM"):
         key = os.getenv("ALPHA_VANTAGE_KEY")
         if not key:
             return 5.0, 0.3
         try:
             url = "https://www.alphavantage.co/query"
             params = {"function":"GLOBAL_QUOTE","symbol":symbol,"apikey":key}
-            r = requests.get(url, params=params, timeout=5).json()
-            price = float(r.get("Global Quote", {}).get("05. price", 100))
-            change_pct = float(r.get("Global Quote", {}).get("10. change percent","0%").replace("%",""))
+            async with session.get(url, params=params, timeout=5) as r:
+                data = await r.json()
+            price = float(data.get("Global Quote", {}).get("05. price", 100))
+            change_pct = float(data.get("Global Quote", {}).get("10. change percent","0%").replace("%",""))
             volatility = abs(change_pct)/100.0
             market_score = min(10.0, price/100*(1-volatility)*10)
             return market_score, volatility
         except:
             return 5.0, 0.3
 
-    # Fetch PubMed
-    def fetch_pubmed_score(self, text):
+    async def fetch_pubmed_score(self, session, text):
         try:
             url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
             params = {"db":"pubmed","term":text,"retmode":"json"}
-            r = requests.get(url, params=params, timeout=5).json()
-            count = int(r.get("esearchresult", {}).get("count", "0"))
+            async with session.get(url, params=params, timeout=5) as r:
+                data = await r.json()
+            count = int(data.get("esearchresult", {}).get("count","0"))
             return min(10.0, math.log1p(count))
         except:
             return 3.0
 
-    # Fetch Wikipedia
-    def fetch_wikipedia_score(self, text):
+    async def fetch_wikipedia_score(self, session, text):
         try:
             url = f"https://en.wikipedia.org/api/rest_v1/page/summary/{'+'.join(text.split()[:4])}"
-            r = requests.get(url, timeout=5).json()
-            summary = r.get("extract","")
+            async with session.get(url, timeout=5) as r:
+                data = await r.json()
+            summary = data.get("extract","")
             return min(10.0, len(summary)/200)
         except:
             return 4.0
 
-    # Generate high-quality prescriptions
-    def get_high_quality_prescription(self, stack):
+    async def get_high_quality_prescription(self, stack):
         if not self.openai_key:
-            return ["LLM prescription unavailable (no API key)."]
+            return ["LLM API key not set."]
         if stack.omega_dyn >= 0.7:
             return ["System stable. No corrective intervention required."]
         prompt = (
@@ -118,7 +119,7 @@ class UnifiedUEDPEngine:
             "Provide exactly 3 high-resolution strategic actions to flip from THANATOS to ANADOS."
         )
         try:
-            response = openai.ChatCompletion.create(
+            response = await openai.ChatCompletion.acreate(
                 model="gpt-3.5-turbo",
                 messages=[{"role":"user","content":prompt}],
                 temperature=0.3,
@@ -127,27 +128,49 @@ class UnifiedUEDPEngine:
             text = response.choices[0].message.content.strip()
             return [line.strip() for line in text.split("\n") if line.strip()]
         except:
-            return ["Prescription generation failed."]
+            return ["LLM prescription generation failed."]
 
-    # Full UEDP process
-    def process(self, text_input):
+    # ---------------- FULL PROCESS ----------------
+    async def process(self, text_input):
         self.turn += 1
         uq, sq, aiq = self.get_triangulation(text_input)
         domains = self.detect_domains(text_input)
 
         market_q, market_vol = 0.0, 0.3
-        if "market" in domains:
-            market_q, market_vol = self.fetch_alpha_vantage()
         science_pub, wiki_pub = 0.0, 0.0
-        if "science" in domains:
-            science_pub = self.fetch_pubmed_score(text_input)
-        if "wiki" in domains:
-            wiki_pub = self.fetch_wikipedia_score(text_input)
+
+        async with aiohttp.ClientSession() as session:
+            tasks = []
+            if "market" in domains:
+                tasks.append(self.fetch_alpha_vantage(session))
+            else:
+                tasks.append(asyncio.sleep(0, result=(5.0,0.3)))
+            if "science" in domains:
+                tasks.append(self.fetch_pubmed_score(session, text_input))
+            else:
+                tasks.append(asyncio.sleep(0, result=0.0))
+            if "wiki" in domains:
+                tasks.append(self.fetch_wikipedia_score(session, text_input))
+            else:
+                tasks.append(asyncio.sleep(0, result=0.0))
+            results = await asyncio.gather(*tasks)
+            market_q, market_vol = results[0]
+            science_pub = results[1]
+            wiki_pub = results[2]
+
+            # Generate LLM prescriptions asynchronously
+            stack_for_llm = UEDPIndicatorStack(
+                turn=self.turn, omega_dyn=0.0, i_seq=0.0, at_ratio=0.0, tau_rsl=0.0,
+                agency_sign="", strategic_verdict="", k_entropy=0, c_load=0, s_latency=0,
+                p_reserve=0, d_drag=0, f_noise=0, r_repair=0, t_trust=0,
+                e_exposure=0, m_momentum=0, extra1=0, extra2=0,
+                user_q=uq, science_q=sq, ai_mental_q=aiq,
+                market_q=market_q, llm_q=5.0
+            )
+            prescriptions_task = asyncio.create_task(self.get_high_quality_prescription(stack_for_llm))
 
         science_q = min(10.0, sq + science_pub + wiki_pub)
-
-        # LLM score fallback
-        llm_q = 5.0
+        llm_q = 5.0  # fallback
 
         magnitude = uq*0.25 + science_q*0.20 + aiq*0.15 + market_q*0.20 + llm_q*0.20
         variance = max(0.01, (10.0 - magnitude)/2.0)
@@ -173,16 +196,7 @@ class UnifiedUEDPEngine:
         agency = "ANADOS" if omega_dyn >= self.omega_crit else "THANATOS"
         verdict = f"✅ System Stable" if agency=="ANADOS" else f"🛑 CAUTION"
 
-        prescriptions = self.get_high_quality_prescription(UEDPIndicatorStack(
-            turn=self.turn, omega_dyn=omega_dyn, i_seq=i_seq, at_ratio=at_ratio,
-            tau_rsl=tau_rsl, agency_sign=agency, strategic_verdict=verdict,
-            k_entropy=k_entropy, c_load=c_load, s_latency=s_latency,
-            p_reserve=p_reserve, d_drag=d_drag, f_noise=f_noise,
-            r_repair=r_repair, t_trust=t_trust, e_exposure=e_exposure,
-            m_momentum=m_momentum, extra1=extra1, extra2=extra2,
-            user_q=uq, science_q=science_q, ai_mental_q=aiq,
-            market_q=market_q, llm_q=llm_q
-        ))
+        prescriptions = await prescriptions_task
 
         return UEDPIndicatorStack(
             turn=self.turn, omega_dyn=omega_dyn, i_seq=i_seq, at_ratio=at_ratio,
@@ -278,7 +292,7 @@ def index():
     if request.method=='POST':
         user_text = request.form.get('text_input','')
         if user_text:
-            result = engine.process(user_text)
+            result = asyncio.run(engine.process(user_text))
             history.append(result.omega_dyn)
     labels = [f"Step {i+1}" for i in range(len(history))]
     return render_template_string(TEMPLATE, result=result, history=history,
