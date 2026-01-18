@@ -42,7 +42,7 @@ class UnifiedUEDPEngine:
         self.openai_key = os.getenv("OPENAI_API_KEY")
         if self.openai_key:
             openai.api_key = self.openai_key
-            can i paste this code too?:    def get_high_quality_prescription(self, stack):
+        def get_high_quality_prescription(self, stack):
 
     if not self.openai_key:
 
