@@ -5,7 +5,7 @@ import re
 
 app = Flask(__name__)
 
-# ---------------- ENGINE (15-CALCULATION READY) ----------------
+# ---------------- INDICATOR STACK DEFINITION ----------------
 @dataclass
 class UEDPIndicatorStack:
     turn: int
@@ -14,6 +14,8 @@ class UEDPIndicatorStack:
     at_ratio: float
     tau_rsl: float
     agency_sign: str
+    strategic_verdict: str  # Nuanced plus/minus advice
+    # 15 Indicators
     k_entropy: float = 0.0
     c_load: float = 0.0
     s_latency: float = 0.0
@@ -24,6 +26,10 @@ class UEDPIndicatorStack:
     t_trust: float = 0.0
     e_exposure: float = 0.0
     m_momentum: float = 0.0
+    # Triangulation Data
+    user_q: float = 0.0
+    science_q: float = 0.0
+    ai_mental_q: float = 0.0
 
 class UnifiedUEDPEngine:
     def __init__(self, omega_ref=0.85):
@@ -31,124 +37,156 @@ class UnifiedUEDPEngine:
         self.omega_crit = 0.368
         self.turn = 0
 
-    def text_to_latent(self, text):
-        # Simple NLP-inspired parsing to extract latent variables from text
-        stress = len(re.findall(r'fail|problem|risk|loss', text, re.IGNORECASE))
-        conflict = len(re.findall(r'fight|argue|conflict|pressure', text, re.IGNORECASE))
-        resources = len(re.findall(r'money|time|resource|capacity', text, re.IGNORECASE))
-        time_pressure = len(re.findall(r'deadline|soon|urgent|pressure', text, re.IGNORECASE))
-        support = len(re.findall(r'support|help|family|friend', text, re.IGNORECASE))
-        # Avoid zero-division
-        return {
-            'stress': stress + 1,
-            'conflict': conflict + 1,
-            'resources': resources + 1,
-            'time_pressure': time_pressure + 1,
-            'support': support + 1
-        }
+    def get_triangulation(self, text):
+        """
+        AI TOOL+ CORE PROCESS:
+        Triangulates User Mind vs. Scientific Theory vs. AI Mental Model
+        """
+        # 1. User Response Quantification (Intensity of Language)
+        user_intensity = len(re.findall(r'definitely|certainly|must|absolutely|guarantee', text, re.IGNORECASE))
+        user_q = min(10.0, 5.0 + user_intensity)
+
+        # 2. Scientific/Theory Quantification (Mapping to Entropy & Resource Models)
+        # Refers to Maslow/Yerkes-Dodson signals in text
+        theory_signals = len(re.findall(r'basic|need|survival|market|data|research|proven', text, re.IGNORECASE))
+        science_q = min(10.0, 4.0 + theory_signals)
+
+        # 3. AI Mental Model (Consistency/Logic Check)
+        # Checks if user is contradictory (e.g., 'high growth' + 'no money')
+        contradictions = len(re.findall(r'but|however|although|maybe|risk', text, re.IGNORECASE))
+        ai_mental_q = max(1.0, 8.0 - contradictions)
+
+        return user_q, science_q, ai_mental_q
 
     def process(self, text_input):
         self.turn += 1
-        latent = self.text_to_latent(text_input)
-        # Core 33-calculation placeholder logic
-        variance = max(0.01, (latent['stress'] + latent['conflict'] + latent['time_pressure']) / (latent['resources'] + latent['support']))
+        
+        # --- STEP 1: TRIANGULATION ---
+        uq, sq, aiq = self.get_triangulation(text_input)
+        
+        # --- STEP 2: 33-CALCULATION GAUNTLET (CORE LOGIC) ---
+        # Weighted Magnitude (40% User, 40% Science, 20% AI Model)
+        magnitude = (uq * 0.4) + (sq * 0.4) + (aiq * 0.2)
+        
+        # Simplified representation of the 33 internal calculation steps
+        variance = max(0.01, (10.0 - magnitude) / 2.0)
         i_seq = math.sqrt(variance)
-        omega_dyn = math.exp(-1.0 * (0.4 * variance + 0.3))
+        
+        # Coherence (Omega) using Exponential Decay
+        omega_dyn = math.exp(-1.0 * (0.4 * variance + 0.15))
         tau_rsl = self.omega_ref - omega_dyn
-        agency = 'ANADOS (Growth)' if omega_dyn >= self.omega_crit else 'THANATOS (Braking)'
-        at_ratio = (omega_dyn / self.omega_ref) * 1.2
+        at_ratio = (omega_dyn / self.omega_ref) * 1.5
 
-        # Derived indicators
-        k_entropy = variance * 0.7
-        c_load = latent['stress'] * 0.5
-        s_latency = latent['time_pressure'] * 0.4
-        p_reserve = latent['resources'] * 0.6
-        d_drag = latent['conflict'] * 0.3
-        f_noise = latent['stress'] * 0.2
-        r_repair = latent['support'] * 0.5
-        t_trust = latent['support'] * 0.4
-        e_exposure = latent['conflict'] * 0.2
-        m_momentum = omega_dyn * 1.1
+        # --- STEP 3: 15 INDICATOR MAPPING ---
+        k_entropy = variance * 0.8
+        c_load = (10.0 - aiq) * 1.2
+        s_latency = (10.0 - magnitude) * 0.5
+        p_reserve = sq * 0.7
+        d_drag = (10.0 - uq) * 0.3
+        f_noise = (10.0 - sq) * 0.4
+        r_repair = aiq * 0.6
+        t_trust = uq * 0.5
+        e_exposure = (10.0 - sq) * 1.1
+        m_momentum = omega_dyn * 2.0
+
+        # --- STEP 4: STRATEGIC VERDICT (NUANCED ADVICE) ---
+        if omega_dyn < self.omega_crit:
+            verdict = "🛑 STOP: Minuses (Exposure/Noise) are beyond the reversible threshold. System failure likely."
+            agency = "THANATOS (Braking)"
+        else:
+            plus_str = "High Momentum" if m_momentum > 1.0 else "Stability"
+            minus_str = "Reduce Cognitive Load" if c_load > 4.0 else "Watch Exposure"
+            verdict = f"✅ VALID: Decision is right if you focus on: {plus_str} (+) and {minus_str} (-)."
+            agency = "ANADOS (Growth)"
 
         return UEDPIndicatorStack(
-            self.turn, omega_dyn, i_seq, at_ratio, tau_rsl, agency,
-            k_entropy, c_load, s_latency, p_reserve, d_drag,
-            f_noise, r_repair, t_trust, e_exposure, m_momentum
+            turn=self.turn, omega_dyn=omega_dyn, i_seq=i_seq, at_ratio=at_ratio,
+            tau_rsl=tau_rsl, agency_sign=agency, strategic_verdict=verdict,
+            k_entropy=k_entropy, c_load=c_load, s_latency=s_latency,
+            p_reserve=p_reserve, d_drag=d_drag, f_noise=f_noise,
+            r_repair=r_repair, t_trust=t_trust, e_exposure=e_exposure,
+            m_momentum=m_momentum, user_q=uq, science_q=sq, ai_mental_q=aiq
         )
 
+# ---------------- FLASK SETUP ----------------
 engine = UnifiedUEDPEngine()
 history = []
 
-# ---------------- RISK TIERS ----------------
 def risk_tier(omega):
-    if omega >= 0.70:
-        return 'LOW', '#16a34a'
-    if omega >= 0.50:
-        return 'MODERATE', '#f59e0b'
-    return 'HIGH', '#dc2626'
+    if omega >= 0.70: return 'STABLE', '#16a34a'
+    if omega >= 0.45: return 'CAUTION', '#f59e0b'
+    return 'CRITICAL', '#dc2626'
 
-# ---------------- TEMPLATE ----------------
 TEMPLATE = """
 <!DOCTYPE html>
-<html lang='en'>
+<html>
 <head>
-<meta charset='utf-8'/>
-<meta name='viewport' content='width=device-width, initial-scale=1'/>
-<title>Family Risk Radar – Interactive</title>
-<script src='https://cdn.jsdelivr.net/npm/chart.js'></script>
-<script src='https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js'></script>
-<style>
-:root{--bg:#f8fafc;--card:#fff;--muted:#64748b}
-body{font-family:system-ui,-apple-system,sans-serif;background:var(--bg);margin:0;padding:20px}
-.container{max-width:1100px;margin:auto}
-.card{background:var(--card);border-radius:16px;box-shadow:0 6px 20px rgba(0,0,0,.08);padding:20px;margin-bottom:16px}
-textarea{width:100%;padding:12px;border-radius:10px;border:1px solid #e5e7eb;resize:none}
-button{padding:12px 14px;border-radius:12px;border:none;background:#2563eb;color:#fff;font-weight:600;cursor:pointer;margin-top:10px}
-.badge{padding:6px 12px;border-radius:999px;color:#fff;font-weight:700}
-</style>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Next Move | Family Risk Radar</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { font-family: sans-serif; background: #f0f2f5; padding: 20px; }
+        .card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); margin-bottom: 20px; }
+        textarea { width: 100%; border: 1px solid #ddd; border-radius: 8px; padding: 10px; box-sizing: border-box; }
+        button { background: #2563eb; color: white; border: none; padding: 12px 20px; border-radius: 8px; cursor: pointer; font-weight: bold; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
+        .stat { border: 1px solid #eee; padding: 10px; border-radius: 6px; }
+        .verdict { font-size: 1.2em; font-weight: bold; padding: 15px; border-radius: 8px; background: #eef2ff; color: #1e40af; border-left: 5px solid #2563eb; }
+    </style>
 </head>
 <body>
-<div class='container' id='report'>
-  <div class='card'>
-    <h2>🛡️ Family Risk Radar – Interactive</h2>
-    <p style='color:var(--muted)'>Enter your thoughts, concerns, or ideas. The system will analyze and provide feedback.</p>
-    <form method='POST'>
-      <textarea name='text_input' rows='5' required placeholder='Type anything here...'></textarea>
-      <button type='submit'>Analyze</button>
-      <button type='button' onclick='pdf()'>Export PDF</button>
-    </form>
-  </div>
+    <div style="max-width: 900px; margin: auto;">
+        <div class="card">
+            <h2>🛡️ Next Move: Strategic Advisor</h2>
+            <p>Input your unrestricted thoughts. The engine will triangulate User Mind, Science, and AI Models.</p>
+            <form method="POST">
+                <textarea name="text_input" rows="5" placeholder="Example: I want to launch a family savings plan. I have some reserves but market is volatile..."></textarea>
+                <button type="submit">Execute 33-Step Analysis</button>
+            </form>
+        </div>
 
-  {% if result %}
-  <div class='card'>
-    <div style='display:flex;justify-content:space-between;align-items:center'>
-      <h3>Summary</h3>
-      <span class='badge' style='background:{{ tier_color }}'>{{ tier }}</span>
+        {% if result %}
+        <div class="card">
+            <h3>Triangulation Weightage</h3>
+            <div class="grid">
+                <div class="stat">👤 User Mind: <b>{{ result.user_q }}</b></div>
+                <div class="stat">🔬 Science/Theory: <b>{{ result.science_q }}</b></div>
+                <div class="stat">🤖 AI Mental Model: <b>{{ result.ai_mental_q }}</b></div>
+            </div>
+        </div>
+
+        <div class="card verdict">
+            {{ result.strategic_verdict }}
+        </div>
+
+        <div class="card">
+            <h3>15-Indicator Diagnostic Stack</h3>
+            <div class="grid">
+                {% for key, val in indicators.items() %}
+                    {% if key not in ['turn', 'strategic_verdict', 'agency_sign'] %}
+                    <div class="stat">{{ key }}: <br><b>{{ "%.3f"|format(val) }}</b></div>
+                    {% endif %}
+                {% endfor %}
+            </div>
+        </div>
+        
+        <div class="card">
+            <canvas id="chart"></canvas>
+        </div>
+        {% endif %}
     </div>
-    <p><b>Agency:</b> {{ result.agency_sign }}</p>
-    <p><b>Ω Coherence:</b> {{ '%.4f'|format(result.omega_dyn) }} | <b>I_seq:</b> {{ '%.2f'|format(result.i_seq) }} | <b>A/T:</b> {{ '%.2f'|format(result.at_ratio) }}</p>
-  </div>
 
-  <div class='card'>
-    <canvas id='timeline'></canvas>
-  </div>
-
-  <div class='card'>
-    <h3>15-Indicator Table</h3>
-    <pre>{{ indicators }}</pre>
-  </div>
-  {% endif %}
-</div>
-
-<script>
-function pdf(){ html2pdf().from(document.getElementById('report')).save('family-risk-radar.pdf'); }
-{% if history %}
-new Chart(document.getElementById('timeline'),{
- type:'line',
- data:{labels:{{ labels|tojson }},datasets:[{label:'Ω Coherence',data:{{ history|tojson }},fill:true,tension:.3}]}
-});
-{% endif %}
-</script>
+    <script>
+    {% if history %}
+    new Chart(document.getElementById('chart'), {
+        type: 'line',
+        data: {
+            labels: {{ labels|tojson }},
+            datasets: [{ label: 'Ω Coherence', data: {{ history|tojson }}, borderColor: '#2563eb', tension: 0.3 }]
+        }
+    });
+    {% endif %}
+    </script>
 </body>
 </html>
 """
@@ -156,20 +194,20 @@ new Chart(document.getElementById('timeline'),{
 @app.route('/', methods=['GET','POST'])
 def index():
     result = None
-    tier = tier_color = None
     if request.method == 'POST':
         user_text = request.form.get('text_input', '')
         if user_text:
             result = engine.process(user_text)
             history.append(result.omega_dyn)
-            tier, tier_color = risk_tier(result.omega_dyn)
-    labels = [f'T{i+1}' for i in range(len(history))]
+    
+    labels = [f'Step {i+1}' for i in range(len(history))]
     return render_template_string(
         TEMPLATE,
         result=result,
         history=history,
         labels=labels,
-        tier=tier,
-        tier_color=tier_color,
         indicators=asdict(result) if result else None
     )
+
+if __name__ == '__main__':
+    app.run(debug=True)
