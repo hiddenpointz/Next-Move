@@ -26,6 +26,7 @@ class UEDPIndicatorStack:
     t_trust: float = 0.0
     e_exposure: float = 0.0
     m_momentum: float = 0.0
+    prescriptions: list = None
     # Triangulation Data
     user_q: float = 0.0
     science_q: float = 0.0
@@ -204,59 +205,30 @@ class UnifiedUEDPEngine:
     # 5) Full process
     def process(self, text_input):
         self.turn += 1
+        # 1. Triangulate and Detect
         uq, sq, aiq = self.get_triangulation(text_input)
         domains = self.detect_domains(text_input)
 
-        market_q, market_vol, equity_ret, fd_ret = 0.0, 0.3, 0.0, 0.0
-        science_pub, wiki_pub = 0.0, 0.0
+        # 2. Combined LLM Call (ONE trip to AI to avoid timeouts)
+        # Pass the current system state for high-quality insights
+        state_summary = f"Vol={sq}, Mind={uq}, AI={aiq}"
+        llm_q, sol_buffer, directions = self.get_unified_insight(text_input, state_summary)
 
-        if "market" in domains:
-            market_q, market_vol, equity_ret, fd_ret = self.fetch_alpha_vantage()
-        if "science" in domains:
-            science_pub = self.fetch_pubmed_score(text_input)
-        if "wiki" in domains:
-            wiki_pub = self.fetch_wikipedia_score(text_input)
-
-        science_q = min(10.0, sq + science_pub + wiki_pub)
-
-        llm_q, llm_text = self.query_llm_quantification(text_input, domains)
-
-        magnitude = uq*0.25 + science_q*0.20 + aiq*0.15 + market_q*0.20 + llm_q*0.20
+        # 3. Final Calculations
+        magnitude = (uq*0.2 + sq*0.2 + aiq*0.1 + 5.0*0.2 + llm_q*0.3)
         variance = max(0.01, (10.0 - magnitude)/2.0)
-        i_seq = math.sqrt(variance)
         omega_dyn = math.exp(-1.0*(0.4*variance + 0.15))
-        tau_rsl = self.omega_ref - omega_dyn
-        at_ratio = (omega_dyn/self.omega_ref)*1.5
 
-        # 15 indicators
-        k_entropy = variance*0.8
-        c_load = (10.0 - aiq)*1.2
-        s_latency = (10.0 - magnitude)*0.5
-        p_reserve = science_q*0.7
-        d_drag = (10.0 - uq)*0.3
-        f_noise = (10.0 - science_q)*0.4
-        r_repair = aiq*0.6
-        t_trust = uq*0.5
-        e_exposure = (10.0 - science_q)*1.1
-        m_momentum = omega_dyn*2.0
-
-        if omega_dyn < self.omega_crit or market_vol>0.35:
-            verdict = f"🛑 High market volatility ({market_vol*100:.1f}%). Caution recommended."
-            agency = "THANATOS"
-        else:
-            plus_str = "Growth" if m_momentum>1 else "Stability"
-            minus_str = "Watch Load" if c_load>4 else "Watch Exposure"
-            verdict = f"✅ {plus_str} (+), {minus_str} (-). LLM: {llm_text}"
-            agency = "ANADOS"
+        # 4. Indicators with Solution Buffer
+        p_reserve = (sq * 0.4) + (sol_buffer * 0.6)
 
         return UEDPIndicatorStack(
-            turn=self.turn, omega_dyn=omega_dyn, i_seq=i_seq, at_ratio=at_ratio,
-            tau_rsl=tau_rsl, agency_sign=agency, strategic_verdict=verdict,
-            k_entropy=k_entropy, c_load=c_load, s_latency=s_latency,
-            p_reserve=p_reserve, d_drag=d_drag, f_noise=f_noise,
-            r_repair=r_repair, t_trust=t_trust, e_exposure=e_exposure,
-            m_momentum=m_momentum, user_q=uq, science_q=science_q,
-            ai_mental_q=aiq, market_q=market_q, llm_q=llm_q
+            turn=self.turn, omega_dyn=omega_dyn, i_seq=math.sqrt(variance),
+            at_ratio=(omega_dyn/0.85)*1.5, tau_rsl=0.85-omega_dyn,
+            agency_sign="ANADOS" if omega_dyn >= 0.368 else "THANATOS",
+            strategic_verdict="VALID" if omega_dyn >= 0.368 else "STOP",
+            p_reserve=p_reserve, prescriptions=directions,
+            user_q=uq, science_q=sq, ai_mental_q=aiq, llm_q=llm_q
         )
 
 # ---------------- FLASK ----------------
