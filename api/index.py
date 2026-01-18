@@ -15,24 +15,19 @@ class UEDPIndicatorStack:
     tau_rsl: float
     agency_sign: str
     strategic_verdict: str
-    # 15 Indicators
+
     k_entropy: float = 0.0
     c_load: float = 0.0
     s_latency: float = 0.0
     p_reserve: float = 0.0
-    d_drag: float = 0.0
-    f_noise: float = 0.0
-    r_repair: float = 0.0
-    t_trust: float = 0.0
-    e_exposure: float = 0.0
-    m_momentum: float = 0.0
     prescriptions: list = None
-    # Triangulation Data
+
     user_q: float = 0.0
     science_q: float = 0.0
     ai_mental_q: float = 0.0
     market_q: float = 0.0
     llm_q: float = 0.0
+
 
 # ---------------- ENGINE ----------------
 class UnifiedUEDPEngine:
@@ -40,287 +35,137 @@ class UnifiedUEDPEngine:
         self.omega_ref = omega_ref
         self.omega_crit = 0.368
         self.turn = 0
+
         self.openai_key = os.getenv("OPENAI_API_KEY")
         if self.openai_key:
             openai.api_key = self.openai_key
-        def get_high_quality_prescription(self, stack):
 
-    if not self.openai_key:
+    # ---------- HIGH QUALITY PRESCRIPTION ----------
+    def get_high_quality_prescription(self, stack):
+        if not self.openai_key:
+            return ["LLM prescription unavailable (no API key)."]
 
-        return ["LLM prescription unavailable (no API key)."]
+        if stack.omega_dyn >= 0.70:
+            return ["System already stable (ANADOS). No corrective action required."]
 
-
-
-    # Guardrail: only prescribe when needed
-
-    if stack.omega_dyn >= 0.70:
-
-        return ["System already in ANADOS. No corrective action required."]
-
-
-
-    prompt = (
-
-        "You are an expert systems strategist.\n\n"
-
-        f"UEDP State:\n"
-
-        f"- Omega (coherence): {stack.omega_dyn:.3f}\n"
-
-        f"- Cognitive Load: {stack.c_load:.1f}\n"
-
-        f"- Strategic Reserves: {stack.p_reserve:.1f}\n"
-
-        f"- Market Stress: {stack.market_q:.1f}\n\n"
-
-        "Task:\n"
-
-        "Provide exactly 3 high-resolution, non-obvious strategic actions\n"
-
-        "that will shift this system from THANATOS to ANADOS.\n\n"
-
-        "Constraints:\n"
-
-        "- Each action must be concrete and testable\n"
-
-        "- Avoid motivational or generic advice\n"
-
-        "- Focus on risk-shielding, resource buffering, and entropy reduction\n\n"
-
-        "Format:\n"
-
-        "1. <Action>\n"
-
-        "2. <Action>\n"
-
-        "3. <Action>"
-
-    )
-
-
-
-    try:
-
-        response = openai.ChatCompletion.create(
-
-            model="gpt-3.5-turbo",
-
-            messages=[{"role": "user", "content": prompt}],
-
-            temperature=0.3,
-
-            max_tokens=300
-
+        prompt = (
+            "You are an expert systems strategist.\n\n"
+            f"Omega: {stack.omega_dyn:.3f}\n"
+            f"Cognitive Load: {stack.c_load:.1f}\n"
+            f"Strategic Reserves: {stack.p_reserve:.1f}\n\n"
+            "Provide exactly 3 concrete, testable actions "
+            "to shift this system from instability to stability.\n\n"
+            "Format:\n"
+            "1. Action\n2. Action\n3. Action"
         )
 
-        text = response.choices[0].message.content.strip()
-
-        return [line.strip() for line in text.split("\n") if line.strip()]
-
-
-
-    except Exception as e:
-
-        return [f"Prescription generation failed safely: {e}"]
-
-    # 1) Triangulate user/science/AI
-    def get_triangulation(self, text):
-        user_intensity = len(re.findall(r'definitely|certainly|must|absolutely|guarantee', text, re.IGNORECASE))
-        user_q = min(10.0, 5.0 + user_intensity)
-        theory_signals = len(re.findall(r'basic|need|survival|market|data|research|proven', text, re.IGNORECASE))
-        science_q = min(10.0, 4.0 + theory_signals)
-        contradictions = len(re.findall(r'but|however|although|maybe|risk', text, re.IGNORECASE))
-        ai_mental_q = max(1.0, 8.0 - contradictions)
-        return user_q, science_q, ai_mental_q
-
-    # 2) Detect query domain
-    def detect_domains(self, text):
-        text = text.lower()
-        domains = []
-        if any(k in text for k in ["market","stocks","equity","index","returns","volatility"]):
-            domains.append("market")
-        if any(k in text for k in ["risk","planning","psychology","stress","science","research"]):
-            domains.append("science")
-        if any(k in text for k in ["wiki","information","wikipedia","learn"]):
-            domains.append("wiki")
-        return domains
-
-    # 3A) Alpha Vantage market
-    def fetch_alpha_vantage(self, symbol="IBM"):
-        key = os.getenv("ALPHA_VANTAGE_KEY")
-        if not key:
-            return 5.0, 0.3, 0.05, 0.02
-        url = "https://www.alphavantage.co/query"
-        params = {"function":"GLOBAL_QUOTE","symbol":symbol,"apikey":key}
         try:
-            r = requests.get(url, params=params, timeout=10).json()
-            quote = r.get("Global Quote", {})
-            price = float(quote.get("05. price","0") or 0)
-            change_pct = float(quote.get("10. change percent","0%").replace("%","") or 0)
-            volatility = abs(change_pct)/100.0
-            market_score = min(10.0, price/100*(1-volatility)*10)
-            return market_score, volatility, change_pct/100, 0.02
-        except:
-            return 5.0, 0.3, 0.05, 0.02
-
-    # 3B) PubMed
-    def fetch_pubmed_score(self, text):
-        base = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
-        params = {"db":"pubmed","term":text,"retmode":"json"}
-        try:
-            r = requests.get(base, params=params, timeout=10).json()
-            count = int(r.get("esearchresult", {}).get("count", "0"))
-            return min(10.0, math.log1p(count))
-        except:
-            return 3.0
-
-    # 3C) Wikipedia
-    def fetch_wikipedia_score(self, text):
-        try:
-            url = f"https://en.wikipedia.org/api/rest_v1/page/summary/{'+'.join(text.split()[:4])}"
-            r = requests.get(url, timeout=5).json()
-            summary = r.get("extract","")
-            return min(10.0, len(summary)/200)
-        except:
-            return 4.0
-
-    # 4) LLM reasoning
-    def query_llm_quantification(self, text, domains):
-        if not self.openai_key:
-            return 5.0, "No LLM key configured"
-        try:
-            prompt = f"Extract normalized 0-10 score for query relevance ({','.join(domains)}). Query: {text}"
             response = openai.ChatCompletion.create(
                 model="gpt-3.5-turbo",
-                messages=[{"role":"user","content":prompt}],
-                max_tokens=150
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.3,
+                max_tokens=250
             )
-            llm_txt = response.choices[0].message.content
-            found = re.findall(r"\b([0-9](?:\.\d+)?)\b", llm_txt)
-            score = float(found[0]) if found else 5.0
-            return min(10.0, score), llm_txt.strip()
+            text = response.choices[0].message.content.strip()
+            return [l.strip() for l in text.split("\n") if l.strip()]
         except Exception as e:
-            return 5.0, f"LLM error: {e}"
+            return [f"Prescription generation failed safely: {e}"]
 
-    # 5) Full process
+    # ---------- TRIANGULATION ----------
+    def get_triangulation(self, text):
+        uq = min(10.0, 5.0 + len(re.findall(r'must|guarantee|definitely', text, re.I)))
+        sq = min(10.0, 4.0 + len(re.findall(r'research|data|study|science', text, re.I)))
+        aiq = max(1.0, 8.0 - len(re.findall(r'but|risk|maybe|however', text, re.I)))
+        return uq, sq, aiq
+
+    # ---------- CORE PROCESS ----------
     def process(self, text_input):
         self.turn += 1
-        # 1. Triangulate and Detect
         uq, sq, aiq = self.get_triangulation(text_input)
-        domains = self.detect_domains(text_input)
 
-        # 2. Combined LLM Call (ONE trip to AI to avoid timeouts)
-        # Pass the current system state for high-quality insights
-        state_summary = f"Vol={sq}, Mind={uq}, AI={aiq}"
-        llm_q, sol_buffer, directions = self.get_unified_insight(text_input, state_summary)
+        magnitude = uq*0.3 + sq*0.3 + aiq*0.2 + 1.5
+        variance = max(0.01, (10 - magnitude)/2)
 
-        # 3. Final Calculations
-        magnitude = (uq*0.2 + sq*0.2 + aiq*0.1 + 5.0*0.2 + llm_q*0.3)
-        variance = max(0.01, (10.0 - magnitude)/2.0)
-        omega_dyn = math.exp(-1.0*(0.4*variance + 0.15))
+        omega_dyn = math.exp(-0.4 * variance)
+        i_seq = math.sqrt(variance)
 
-        # 4. Indicators with Solution Buffer
-        p_reserve = (sq * 0.4) + (sol_buffer * 0.6)
+        p_reserve = sq * 0.6
+        c_load = (10 - aiq)
 
-        return UEDPIndicatorStack(
-            turn=self.turn, omega_dyn=omega_dyn, i_seq=math.sqrt(variance),
-            at_ratio=(omega_dyn/0.85)*1.5, tau_rsl=0.85-omega_dyn,
-            agency_sign="ANADOS" if omega_dyn >= 0.368 else "THANATOS",
-            strategic_verdict="VALID" if omega_dyn >= 0.368 else "STOP",
-            p_reserve=p_reserve, prescriptions=directions,
-            user_q=uq, science_q=sq, ai_mental_q=aiq, llm_q=llm_q
+        stack = UEDPIndicatorStack(
+            turn=self.turn,
+            omega_dyn=omega_dyn,
+            i_seq=i_seq,
+            at_ratio=(omega_dyn/self.omega_ref)*1.5,
+            tau_rsl=self.omega_ref - omega_dyn,
+            agency_sign="ANADOS" if omega_dyn >= self.omega_crit else "THANATOS",
+            strategic_verdict="STABLE" if omega_dyn >= self.omega_crit else "CAUTION",
+            p_reserve=p_reserve,
+            c_load=c_load,
+            user_q=uq,
+            science_q=sq,
+            ai_mental_q=aiq,
+            llm_q=5.0
         )
+
+        stack.prescriptions = self.get_high_quality_prescription(stack)
+        return stack
+
 
 # ---------------- FLASK ----------------
 engine = UnifiedUEDPEngine()
 history = []
 
 TEMPLATE = """
-<!DOCTYPE html>
+<!doctype html>
 <html>
 <head>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Family Risk Radar - Live</title>
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<title>Family Risk Radar</title>
 <style>
-body { font-family: sans-serif; background: #f0f2f5; padding: 20px; }
-.card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); margin-bottom: 20px; }
-textarea { width: 100%; border: 1px solid #ddd; border-radius: 8px; padding: 10px; box-sizing: border-box; }
-button { background: #2563eb; color: white; border: none; padding: 12px 20px; border-radius: 8px; cursor: pointer; font-weight: bold; }
-.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
-.stat { border: 1px solid #eee; padding: 10px; border-radius: 6px; }
-.verdict { font-size: 1.2em; font-weight: bold; padding: 15px; border-radius: 8px; background: #eef2ff; color: #1e40af; border-left: 5px solid #2563eb; }
+body { font-family: Arial; background:#f4f4f4; padding:20px; }
+.card { background:white; padding:20px; margin-bottom:20px; border-radius:8px; }
 </style>
 </head>
 <body>
-<div style="max-width:900px;margin:auto;">
+
 <div class="card">
 <h2>🛡️ Family Risk Radar</h2>
-<p>Enter your thoughts; engine pulls live Market, PubMed, Wikipedia, and LLM reasoning.</p>
 <form method="POST">
-<textarea name="text_input" rows="5" placeholder="Example: I want to launch a family savings plan. Market is volatile."></textarea>
+<textarea name="text_input" rows="5" style="width:100%"></textarea><br><br>
 <button type="submit">Analyze</button>
 </form>
 </div>
 
 {% if result %}
 <div class="card">
-<h3>Triangulation & Live Data</h3>
-<div class="grid">
-<div class="stat">👤 User Mind: <b>{{ result.user_q }}</b></div>
-<div class="stat">🔬 Science: <b>{{ result.science_q }}</b></div>
-<div class="stat">🤖 AI Mental: <b>{{ result.ai_mental_q }}</b></div>
-<div class="stat">💹 Market Score: <b>{{ result.market_q }}</b></div>
-<div class="stat">🧠 LLM Score: <b>{{ result.llm_q }}</b></div>
+<b>Verdict:</b> {{ result.strategic_verdict }}<br>
+<b>Omega:</b> {{ result.omega_dyn }}
 </div>
-</div>
-
-<div class="card verdict">{{ result.strategic_verdict }}</div>
 
 <div class="card">
-<h3>15-Indicator Diagnostic Stack</h3>
-<div class="grid">
-{% for key, val in indicators.items() %}
-    {% if key not in ['turn','strategic_verdict','agency_sign'] %}
-    <div class="stat">{{ key }}:<br><b>{{ "%.3f"|format(val) }}</b></div>
-    {% endif %}
+<h3>Prescriptions</h3>
+<ul>
+{% for p in result.prescriptions %}
+<li>{{ p }}</li>
 {% endfor %}
-</div>
-</div>
-
-<div class="card">
-<canvas id="chart"></canvas>
+</ul>
 </div>
 {% endif %}
-</div>
 
-<script>
-{% if history %}
-new Chart(document.getElementById('chart'), {
-    type: 'line',
-    data: {
-        labels: {{ labels|tojson }},
-        datasets: [{ label: 'Ω Coherence', data: {{ history|tojson }}, borderColor:'#2563eb', tension:0.3 }]
-    }
-});
-{% endif %}
-</script>
 </body>
 </html>
 """
 
-@app.route('/', methods=['GET','POST'])
+@app.route("/", methods=["GET", "POST"])
 def index():
     result = None
-    if request.method=='POST':
-        user_text = request.form.get('text_input','')
-        if user_text:
-            result = engine.process(user_text)
+    if request.method == "POST":
+        text = request.form.get("text_input", "")
+        if text:
+            result = engine.process(text)
             history.append(result.omega_dyn)
-    labels = [f"Step {i+1}" for i in range(len(history))]
-    return render_template_string(TEMPLATE, result=result, history=history,
-                                  labels=labels, indicators=asdict(result) if result else None
-                                 )
+    return render_template_string(TEMPLATE, result=result)
+
+
 if __name__ == "__main__":
     app.run(debug=True)
-
