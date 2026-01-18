@@ -47,6 +47,7 @@ class UnifiedUEDPEngine:
         self.openai_key = os.getenv("OPENAI_API_KEY")
         if self.openai_key:
             openai.api_key = self.openai_key
+            openai.api_base = "https://ai-gateway.vercel.sh/v1"
         else:
             raise RuntimeError("OPENAI_API_KEY environment variable not set")
 
