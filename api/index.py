@@ -43,13 +43,39 @@ class UnifiedUEDPEngine:
         self.omega_ref = omega_ref
         self.omega_crit = 0.368
         self.turn = 0
-        # Read OpenAI key from environment (Vercel sets this)
         self.openai_key = os.getenv("OPENAI_API_KEY")
         if self.openai_key:
             openai.api_key = self.openai_key
-            openai.api_base = "https://ai-gateway.vercel.sh/v1"
-        else:
-            raise RuntimeError("OPENAI_API_KEY environment variable not set")
+            # Ensure base is correct for Vercel Gateway if using it
+            # openai.api_base = "https://ai-gateway.vercel.sh/v1" 
+
+    async def get_unified_insight(self, text, current_stats):
+        """ONE trip to AI: Gets both the LLM Score and the High-Quality Directions."""
+        if not self.openai_key:
+            return 5.0, ["Missing API Key"]
+
+        prompt = (
+            f"Strategic Audit of: '{text}'\n"
+            f"Current Metrics: {current_stats}\n\n"
+            "Return exactly this structure:\n"
+            "Score: [0-10]\n"
+            "Actions: 1. [Action] 2. [Action] 3. [Action]"
+        )
+        try:
+            # Using aio-compatible call if available or wrapping in thread
+            response = await openai.ChatCompletion.acreate(
+                model="gpt-3.5-turbo",
+                messages=[{"role": "system", "content": "You are a Strategic Systems Architect."},
+                          {"role": "user", "content": prompt}],
+                temperature=0.3, max_tokens=250
+            )
+            raw = response.choices[0].message.content
+            # Regex extraction to save the system
+            score = float(re.findall(r"Score:\s*([\d.]+)", raw)[0])
+            actions = re.findall(r"\d\.\s*(.*)", raw)
+            return score, actions
+        except Exception:
+            return 5.0, ["Insight generation timed out. Strengthen reserves manually."]
 
     # Triangulate user/science/AI
     def get_triangulation(self, text):
