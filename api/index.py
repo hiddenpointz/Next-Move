@@ -1,11 +1,7 @@
-# api/index.py
-# FULL PROTOCOL UI: structured inputs, 15-calculation engine hook, risk tiers,
-# visual timeline (Chart.js), and PDF export (html2pdf)
-
-from flask import Flask, request, render_template_string, make_response
+from flask import Flask, request, render_template_string
 import math
 from dataclasses import dataclass, asdict
-from datetime import datetime
+import re
 
 app = Flask(__name__)
 
@@ -13,12 +9,11 @@ app = Flask(__name__)
 @dataclass
 class UEDPIndicatorStack:
     turn: int
-    omega_dyn: float      # Coherence
-    i_seq: float          # Sequential Instability
-    at_ratio: float       # A/T Ratio
-    tau_rsl: float        # RSL Tension
-    agency_sign: str      # Direction
-    # placeholders for remaining indicators (extend safely)
+    omega_dyn: float
+    i_seq: float
+    at_ratio: float
+    tau_rsl: float
+    agency_sign: str
     k_entropy: float = 0.0
     c_load: float = 0.0
     s_latency: float = 0.0
@@ -36,32 +31,43 @@ class UnifiedUEDPEngine:
         self.omega_crit = 0.368
         self.turn = 0
 
-    def process(self, inputs: dict):
-        self.turn += 1
-        # Core math (example mapping from structured inputs)
-        stress = inputs['stress']
-        conflict = inputs['conflict']
-        resources = inputs['resources']
-        time_pressure = inputs['time_pressure']
-        support = inputs['support']
+    def text_to_latent(self, text):
+        # Simple NLP-inspired parsing to extract latent variables from text
+        stress = len(re.findall(r'fail|problem|risk|loss', text, re.IGNORECASE))
+        conflict = len(re.findall(r'fight|argue|conflict|pressure', text, re.IGNORECASE))
+        resources = len(re.findall(r'money|time|resource|capacity', text, re.IGNORECASE))
+        time_pressure = len(re.findall(r'deadline|soon|urgent|pressure', text, re.IGNORECASE))
+        support = len(re.findall(r'support|help|family|friend', text, re.IGNORECASE))
+        # Avoid zero-division
+        return {
+            'stress': stress + 1,
+            'conflict': conflict + 1,
+            'resources': resources + 1,
+            'time_pressure': time_pressure + 1,
+            'support': support + 1
+        }
 
-        variance = max(0.01, (stress + conflict + time_pressure) / (resources + support))
+    def process(self, text_input):
+        self.turn += 1
+        latent = self.text_to_latent(text_input)
+        # Core 33-calculation placeholder logic
+        variance = max(0.01, (latent['stress'] + latent['conflict'] + latent['time_pressure']) / (latent['resources'] + latent['support']))
         i_seq = math.sqrt(variance)
         omega_dyn = math.exp(-1.0 * (0.4 * variance + 0.3))
         tau_rsl = self.omega_ref - omega_dyn
         agency = 'ANADOS (Growth)' if omega_dyn >= self.omega_crit else 'THANATOS (Braking)'
         at_ratio = (omega_dyn / self.omega_ref) * 1.2
 
-        # Derived indicators (simple deterministic placeholders)
+        # Derived indicators
         k_entropy = variance * 0.7
-        c_load = stress * 0.5
-        s_latency = time_pressure * 0.4
-        p_reserve = resources * 0.6
-        d_drag = conflict * 0.3
-        f_noise = stress * 0.2
-        r_repair = support * 0.5
-        t_trust = support * 0.4
-        e_exposure = conflict * 0.2
+        c_load = latent['stress'] * 0.5
+        s_latency = latent['time_pressure'] * 0.4
+        p_reserve = latent['resources'] * 0.6
+        d_drag = latent['conflict'] * 0.3
+        f_noise = latent['stress'] * 0.2
+        r_repair = latent['support'] * 0.5
+        t_trust = latent['support'] * 0.4
+        e_exposure = latent['conflict'] * 0.2
         m_momentum = omega_dyn * 1.1
 
         return UEDPIndicatorStack(
@@ -88,7 +94,7 @@ TEMPLATE = """
 <head>
 <meta charset='utf-8'/>
 <meta name='viewport' content='width=device-width, initial-scale=1'/>
-<title>Family Risk Radar – Full Protocol</title>
+<title>Family Risk Radar – Interactive</title>
 <script src='https://cdn.jsdelivr.net/npm/chart.js'></script>
 <script src='https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js'></script>
 <style>
@@ -96,31 +102,20 @@ TEMPLATE = """
 body{font-family:system-ui,-apple-system,sans-serif;background:var(--bg);margin:0;padding:20px}
 .container{max-width:1100px;margin:auto}
 .card{background:var(--card);border-radius:16px;box-shadow:0 6px 20px rgba(0,0,0,.08);padding:20px;margin-bottom:16px}
-.grid{display:grid;grid-template-columns:repeat(5,1fr);gap:12px}
-label{font-size:12px;color:var(--muted)}
-input{width:100%;padding:10px;border-radius:10px;border:1px solid #e5e7eb}
-button{padding:12px 14px;border-radius:12px;border:none;background:#2563eb;color:#fff;font-weight:600;cursor:pointer}
+textarea{width:100%;padding:12px;border-radius:10px;border:1px solid #e5e7eb;resize:none}
+button{padding:12px 14px;border-radius:12px;border:none;background:#2563eb;color:#fff;font-weight:600;cursor:pointer;margin-top:10px}
 .badge{padding:6px 12px;border-radius:999px;color:#fff;font-weight:700}
-@media(max-width:900px){.grid{grid-template-columns:1fr 1fr}}
 </style>
 </head>
 <body>
 <div class='container' id='report'>
   <div class='card'>
-    <h2>🛡️ Family Risk Radar – Full Protocol</h2>
-    <p style='color:var(--muted)'>Decision support only. Not a clinical diagnosis.</p>
+    <h2>🛡️ Family Risk Radar – Interactive</h2>
+    <p style='color:var(--muted)'>Enter your thoughts, concerns, or ideas. The system will analyze and provide feedback.</p>
     <form method='POST'>
-      <div class='grid'>
-        <div><label>Stress</label><input name='stress' type='number' step='0.1' required></div>
-        <div><label>Conflict</label><input name='conflict' type='number' step='0.1' required></div>
-        <div><label>Resources</label><input name='resources' type='number' step='0.1' required></div>
-        <div><label>Time Pressure</label><input name='time_pressure' type='number' step='0.1' required></div>
-        <div><label>Support</label><input name='support' type='number' step='0.1' required></div>
-      </div>
-      <div style='margin-top:12px;display:flex;gap:10px'>
-        <button type='submit'>Analyze</button>
-        <button type='button' onclick='pdf()'>Export PDF</button>
-      </div>
+      <textarea name='text_input' rows='5' required placeholder='Type anything here...'></textarea>
+      <button type='submit'>Analyze</button>
+      <button type='button' onclick='pdf()'>Export PDF</button>
     </form>
   </div>
 
@@ -163,10 +158,11 @@ def index():
     result = None
     tier = tier_color = None
     if request.method == 'POST':
-        inputs = {k: float(request.form[k]) for k in ['stress','conflict','resources','time_pressure','support']}
-        result = engine.process(inputs)
-        history.append(result.omega_dyn)
-        tier, tier_color = risk_tier(result.omega_dyn)
+        user_text = request.form.get('text_input', '')
+        if user_text:
+            result = engine.process(user_text)
+            history.append(result.omega_dyn)
+            tier, tier_color = risk_tier(result.omega_dyn)
     labels = [f'T{i+1}' for i in range(len(history))]
     return render_template_string(
         TEMPLATE,
