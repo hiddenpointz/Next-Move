@@ -42,6 +42,85 @@ class UnifiedUEDPEngine:
         self.openai_key = os.getenv("OPENAI_API_KEY")
         if self.openai_key:
             openai.api_key = self.openai_key
+            can i paste this code too?:    def get_high_quality_prescription(self, stack):
+
+    if not self.openai_key:
+
+        return ["LLM prescription unavailable (no API key)."]
+
+
+
+    # Guardrail: only prescribe when needed
+
+    if stack.omega_dyn >= 0.70:
+
+        return ["System already in ANADOS. No corrective action required."]
+
+
+
+    prompt = (
+
+        "You are an expert systems strategist.\n\n"
+
+        f"UEDP State:\n"
+
+        f"- Omega (coherence): {stack.omega_dyn:.3f}\n"
+
+        f"- Cognitive Load: {stack.c_load:.1f}\n"
+
+        f"- Strategic Reserves: {stack.p_reserve:.1f}\n"
+
+        f"- Market Stress: {stack.market_q:.1f}\n\n"
+
+        "Task:\n"
+
+        "Provide exactly 3 high-resolution, non-obvious strategic actions\n"
+
+        "that will shift this system from THANATOS to ANADOS.\n\n"
+
+        "Constraints:\n"
+
+        "- Each action must be concrete and testable\n"
+
+        "- Avoid motivational or generic advice\n"
+
+        "- Focus on risk-shielding, resource buffering, and entropy reduction\n\n"
+
+        "Format:\n"
+
+        "1. <Action>\n"
+
+        "2. <Action>\n"
+
+        "3. <Action>"
+
+    )
+
+
+
+    try:
+
+        response = openai.ChatCompletion.create(
+
+            model="gpt-3.5-turbo",
+
+            messages=[{"role": "user", "content": prompt}],
+
+            temperature=0.3,
+
+            max_tokens=300
+
+        )
+
+        text = response.choices[0].message.content.strip()
+
+        return [line.strip() for line in text.split("\n") if line.strip()]
+
+
+
+    except Exception as e:
+
+        return [f"Prescription generation failed safely: {e}"]
 
     # 1) Triangulate user/science/AI
     def get_triangulation(self, text):
