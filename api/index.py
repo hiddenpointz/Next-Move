@@ -270,5 +270,6 @@ def index():
     return render_template_string(TEMPLATE, result=result, history=history,
                                   labels=labels, indicators=asdict(result) if result else None
                                  )
-
+if __name__ == "__main__":
+    app.run(debug=True)
 
