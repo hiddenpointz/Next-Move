@@ -1,1 +1,3 @@
-flask
+Flask
+requests
+openai==0.28.1
