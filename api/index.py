@@ -1,3 +1,4 @@
+# filename: app.py
 from flask import Flask, request, render_template_string
 import math, re, os, asyncio, aiohttp
 from dataclasses import dataclass, asdict
@@ -42,10 +43,12 @@ class UnifiedUEDPEngine:
         self.omega_ref = omega_ref
         self.omega_crit = 0.368
         self.turn = 0
-        # Let OpenAI SDK handle key itself
+        # Read OpenAI key from environment (Vercel sets this)
         self.openai_key = os.getenv("OPENAI_API_KEY")
         if self.openai_key:
             openai.api_key = self.openai_key
+        else:
+            raise RuntimeError("OPENAI_API_KEY environment variable not set")
 
     # Triangulate user/science/AI
     def get_triangulation(self, text):
@@ -108,9 +111,11 @@ class UnifiedUEDPEngine:
         except:
             return 4.0
 
+    # ---------------- LLM PRESCRIPTION ----------------
     async def get_high_quality_prescription(self, stack):
-        if not self.openai_key:
-            return ["LLM API key not set."]
+        """
+        Uses OpenAI GPT to generate exactly 3 strategic prescriptions
+        """
         if stack.omega_dyn >= 0.7:
             return ["System stable. No corrective intervention required."]
         prompt = (
@@ -158,7 +163,6 @@ class UnifiedUEDPEngine:
             science_pub = results[1]
             wiki_pub = results[2]
 
-            # Generate LLM prescriptions asynchronously
             stack_for_llm = UEDPIndicatorStack(
                 turn=self.turn, omega_dyn=0.0, i_seq=0.0, at_ratio=0.0, tau_rsl=0.0,
                 agency_sign="", strategic_verdict="", k_entropy=0, c_load=0, s_latency=0,
