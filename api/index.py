@@ -1,10 +1,9 @@
-from flask import Flask, request, render_template_string, session
-import math, re, requests, os, time
+from flask import Flask, request, render_template_string
+import math, re, requests, os
 from dataclasses import dataclass, asdict
 import openai
 
 app = Flask(__name__)
-app.secret_key = "family-risk-radar-safe-key"  # required for sessions
 
 # ---------------- INDICATOR STACK ----------------
 @dataclass
@@ -16,158 +15,238 @@ class UEDPIndicatorStack:
     tau_rsl: float
     agency_sign: str
     strategic_verdict: str
-
+    # 15+ indicators
     k_entropy: float = 0.0
     c_load: float = 0.0
+    s_latency: float = 0.0
     p_reserve: float = 0.0
-    market_q: float = 0.0
+    d_drag: float = 0.0
+    f_noise: float = 0.0
+    r_repair: float = 0.0
+    t_trust: float = 0.0
+    e_exposure: float = 0.0
+    m_momentum: float = 0.0
+    extra1: float = 0.0
+    extra2: float = 0.0
+    # Triangulation
+    user_q: float = 0.0
     science_q: float = 0.0
+    ai_mental_q: float = 0.0
+    market_q: float = 0.0
     llm_q: float = 0.0
     prescriptions: list = None
-
 
 # ---------------- ENGINE ----------------
 class UnifiedUEDPEngine:
     def __init__(self, omega_ref=0.85):
         self.omega_ref = omega_ref
         self.omega_crit = 0.368
+        self.turn = 0
         self.openai_key = os.getenv("OPENAI_API_KEY")
         if self.openai_key:
             openai.api_key = self.openai_key
 
-    # ---------- SAFE MARKET ----------
-    def fetch_market_score(self):
+    # Triangulate user/science/AI
+    def get_triangulation(self, text):
+        user_intensity = len(re.findall(r'definitely|certainly|must|absolutely|guarantee', text, re.IGNORECASE))
+        user_q = min(10.0, 5.0 + user_intensity)
+        theory_signals = len(re.findall(r'basic|need|survival|market|data|research|proven', text, re.IGNORECASE))
+        science_q = min(10.0, 4.0 + theory_signals)
+        contradictions = len(re.findall(r'but|however|although|maybe|risk', text, re.IGNORECASE))
+        ai_mental_q = max(1.0, 8.0 - contradictions)
+        return user_q, science_q, ai_mental_q
+
+    # Detect query domains
+    def detect_domains(self, text):
+        text = text.lower()
+        domains = []
+        if any(k in text for k in ["market","stocks","equity","index","returns","volatility"]):
+            domains.append("market")
+        if any(k in text for k in ["risk","planning","psychology","stress","science","research"]):
+            domains.append("science")
+        if any(k in text for k in ["wiki","information","wikipedia","learn"]):
+            domains.append("wiki")
+        return domains
+
+    # Fetch Market
+    def fetch_alpha_vantage(self, symbol="IBM"):
         key = os.getenv("ALPHA_VANTAGE_KEY")
         if not key:
-            return 5.0  # neutral fallback
-
+            return 5.0, 0.3
         try:
-            r = requests.get(
-                "https://www.alphavantage.co/query",
-                params={
-                    "function": "GLOBAL_QUOTE",
-                    "symbol": "SPY",
-                    "apikey": key
-                },
-                timeout=4
-            ).json()
-
-            price = float(r["Global Quote"]["05. price"])
-            change = abs(float(r["Global Quote"]["10. change percent"].replace("%", "")))
-            return min(10.0, (price / 100) * (1 - change / 100))
+            url = "https://www.alphavantage.co/query"
+            params = {"function":"GLOBAL_QUOTE","symbol":symbol,"apikey":key}
+            r = requests.get(url, params=params, timeout=5).json()
+            price = float(r.get("Global Quote", {}).get("05. price", 100))
+            change_pct = float(r.get("Global Quote", {}).get("10. change percent","0%").replace("%",""))
+            volatility = abs(change_pct)/100.0
+            market_score = min(10.0, price/100*(1-volatility)*10)
+            return market_score, volatility
         except:
-            return 5.0
+            return 5.0, 0.3
 
-    # ---------- SAFE PUBMED ----------
+    # Fetch PubMed
     def fetch_pubmed_score(self, text):
         try:
-            r = requests.get(
-                "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi",
-                params={
-                    "db": "pubmed",
-                    "term": text,
-                    "retmode": "json"
-                },
-                timeout=4
-            ).json()
-            count = int(r["esearchresult"]["count"])
+            url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
+            params = {"db":"pubmed","term":text,"retmode":"json"}
+            r = requests.get(url, params=params, timeout=5).json()
+            count = int(r.get("esearchresult", {}).get("count", "0"))
             return min(10.0, math.log1p(count))
         except:
             return 3.0
 
-    # ---------- TRIANGULATION ----------
-    def triangulate(self, text):
-        user_q = min(10, 5 + len(re.findall(r'must|guarantee|definitely', text, re.I)))
-        science_q = self.fetch_pubmed_score(text)
-        ai_q = max(1, 8 - len(re.findall(r'but|risk|maybe|however', text, re.I)))
-        return user_q, science_q, ai_q
-
-    # ---------- PRESCRIPTION ----------
-    def get_prescription(self, stack):
-        if not self.openai_key or stack.omega_dyn >= 0.7:
-            return ["System stable. No corrective intervention required."]
-
+    # Fetch Wikipedia
+    def fetch_wikipedia_score(self, text):
         try:
-            prompt = (
-                f"Omega={stack.omega_dyn:.3f}, "
-                f"Load={stack.c_load:.1f}, "
-                f"Reserves={stack.p_reserve:.1f}. "
-                "Provide exactly 3 concrete risk-shielding actions."
-            )
-
-            r = openai.ChatCompletion.create(
-                model="gpt-3.5-turbo",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.3,
-                max_tokens=200
-            )
-            return [l for l in r.choices[0].message.content.split("\n") if l.strip()]
+            url = f"https://en.wikipedia.org/api/rest_v1/page/summary/{'+'.join(text.split()[:4])}"
+            r = requests.get(url, timeout=5).json()
+            summary = r.get("extract","")
+            return min(10.0, len(summary)/200)
         except:
-            return ["LLM unavailable — manual stabilization advised."]
+            return 4.0
 
-    # ---------- CORE PROCESS ----------
-    def process(self, text, turn):
-        uq, sq, aiq = self.triangulate(text)
-        market_q = self.fetch_market_score()
+    # Generate high-quality prescriptions
+    def get_high_quality_prescription(self, stack):
+        if not self.openai_key:
+            return ["LLM prescription unavailable (no API key)."]
+        if stack.omega_dyn >= 0.7:
+            return ["System stable. No corrective intervention required."]
+        prompt = (
+            f"UEDP State:\nOmega={stack.omega_dyn:.3f}, Load={stack.c_load:.1f}, "
+            f"Reserves={stack.p_reserve:.1f}, Market={stack.market_q:.1f}\n"
+            "Provide exactly 3 high-resolution strategic actions to flip from THANATOS to ANADOS."
+        )
+        try:
+            response = openai.ChatCompletion.create(
+                model="gpt-3.5-turbo",
+                messages=[{"role":"user","content":prompt}],
+                temperature=0.3,
+                max_tokens=300
+            )
+            text = response.choices[0].message.content.strip()
+            return [line.strip() for line in text.split("\n") if line.strip()]
+        except:
+            return ["Prescription generation failed."]
 
-        magnitude = uq*0.25 + sq*0.25 + aiq*0.15 + market_q*0.15 + 1.2
-        variance = max(0.01, (10 - magnitude)/2)
+    # Full UEDP process
+    def process(self, text_input):
+        self.turn += 1
+        uq, sq, aiq = self.get_triangulation(text_input)
+        domains = self.detect_domains(text_input)
 
-        omega = math.exp(-0.4 * variance)
+        market_q, market_vol = 0.0, 0.3
+        if "market" in domains:
+            market_q, market_vol = self.fetch_alpha_vantage()
+        science_pub, wiki_pub = 0.0, 0.0
+        if "science" in domains:
+            science_pub = self.fetch_pubmed_score(text_input)
+        if "wiki" in domains:
+            wiki_pub = self.fetch_wikipedia_score(text_input)
 
-        stack = UEDPIndicatorStack(
-            turn=turn,
-            omega_dyn=omega,
-            i_seq=math.sqrt(variance),
-            at_ratio=(omega/self.omega_ref)*1.5,
-            tau_rsl=self.omega_ref - omega,
-            agency_sign="ANADOS" if omega >= self.omega_crit else "THANATOS",
-            strategic_verdict="STABLE" if omega >= self.omega_crit else "CAUTION",
-            k_entropy=variance,
-            c_load=(10-aiq),
-            p_reserve=sq*0.6,
-            market_q=market_q,
-            science_q=sq,
-            llm_q=5.0
+        science_q = min(10.0, sq + science_pub + wiki_pub)
+
+        # LLM score fallback
+        llm_q = 5.0
+
+        magnitude = uq*0.25 + science_q*0.20 + aiq*0.15 + market_q*0.20 + llm_q*0.20
+        variance = max(0.01, (10.0 - magnitude)/2.0)
+        i_seq = math.sqrt(variance)
+        omega_dyn = math.exp(-1.0*(0.4*variance + 0.15))
+        tau_rsl = self.omega_ref - omega_dyn
+        at_ratio = (omega_dyn/self.omega_ref)*1.5
+
+        # 15+ indicators
+        k_entropy = variance*0.8
+        c_load = (10.0 - aiq)*1.2
+        s_latency = (10.0 - magnitude)*0.5
+        p_reserve = science_q*0.7
+        d_drag = (10.0 - uq)*0.3
+        f_noise = (10.0 - science_q)*0.4
+        r_repair = aiq*0.6
+        t_trust = uq*0.5
+        e_exposure = (10.0 - science_q)*1.1
+        m_momentum = omega_dyn*2.0
+        extra1 = market_q*0.5
+        extra2 = variance*0.6
+
+        agency = "ANADOS" if omega_dyn >= self.omega_crit else "THANATOS"
+        verdict = f"✅ System Stable" if agency=="ANADOS" else f"🛑 CAUTION"
+
+        prescriptions = self.get_high_quality_prescription(UEDPIndicatorStack(
+            turn=self.turn, omega_dyn=omega_dyn, i_seq=i_seq, at_ratio=at_ratio,
+            tau_rsl=tau_rsl, agency_sign=agency, strategic_verdict=verdict,
+            k_entropy=k_entropy, c_load=c_load, s_latency=s_latency,
+            p_reserve=p_reserve, d_drag=d_drag, f_noise=f_noise,
+            r_repair=r_repair, t_trust=t_trust, e_exposure=e_exposure,
+            m_momentum=m_momentum, extra1=extra1, extra2=extra2,
+            user_q=uq, science_q=science_q, ai_mental_q=aiq,
+            market_q=market_q, llm_q=llm_q
+        ))
+
+        return UEDPIndicatorStack(
+            turn=self.turn, omega_dyn=omega_dyn, i_seq=i_seq, at_ratio=at_ratio,
+            tau_rsl=tau_rsl, agency_sign=agency, strategic_verdict=verdict,
+            k_entropy=k_entropy, c_load=c_load, s_latency=s_latency,
+            p_reserve=p_reserve, d_drag=d_drag, f_noise=f_noise,
+            r_repair=r_repair, t_trust=t_trust, e_exposure=e_exposure,
+            m_momentum=m_momentum, extra1=extra1, extra2=extra2,
+            user_q=uq, science_q=science_q, ai_mental_q=aiq,
+            market_q=market_q, llm_q=llm_q,
+            prescriptions=prescriptions
         )
 
-        stack.prescriptions = self.get_prescription(stack)
-        return stack
-
-
+# ---------------- FLASK ----------------
 engine = UnifiedUEDPEngine()
+history = []
 
-# ---------------- UI ----------------
-TEMPLATE = """
-<!doctype html>
+TEMPLATE = """<!DOCTYPE html>
 <html>
 <head>
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Family Risk Radar</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <style>
-body { font-family: Arial; background:#f3f4f6; padding:20px; }
-.card { background:white; padding:20px; margin-bottom:20px; border-radius:8px; }
+body { font-family: sans-serif; background: #f0f2f5; padding: 20px; }
+.card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); margin-bottom: 20px; }
+textarea { width: 100%; border: 1px solid #ddd; border-radius: 8px; padding: 10px; box-sizing: border-box; }
+button { background: #2563eb; color: white; border: none; padding: 12px 20px; border-radius: 8px; cursor: pointer; font-weight: bold; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
+.stat { border: 1px solid #eee; padding: 10px; border-radius: 6px; }
+.verdict { font-size: 1.2em; font-weight: bold; padding: 15px; border-radius: 8px; background: #eef2ff; color: #1e40af; border-left: 5px solid #2563eb; }
 </style>
 </head>
 <body>
-
+<div style="max-width:900px;margin:auto;">
 <div class="card">
 <h2>🛡️ Family Risk Radar</h2>
+<p>Enter your thoughts; engine pulls live Market, PubMed, Wikipedia, and LLM reasoning.</p>
 <form method="POST">
-<textarea name="text" rows="4" style="width:100%"></textarea><br><br>
+<textarea name="text_input" rows="5" placeholder="Example: Family savings plan. Market is volatile."></textarea>
 <button type="submit">Analyze</button>
 </form>
 </div>
 
 {% if result %}
 <div class="card">
-<b>Verdict:</b> {{ result.strategic_verdict }}<br>
-<b>Omega:</b> {{ result.omega_dyn }}
+<h3>Indicators & Triangulation</h3>
+<div class="grid">
+{% for key, val in indicators.items() %}
+    {% if key not in ['turn','strategic_verdict','agency_sign','prescriptions'] %}
+    <div class="stat">{{ key }}:<br><b>{{ "%.3f"|format(val) }}</b></div>
+    {% endif %}
+{% endfor %}
+</div>
 </div>
 
-<div class="card">
-<h3>Prescriptions</h3>
-<ul>{% for p in result.prescriptions %}<li>{{ p }}</li>{% endfor %}</ul>
+<div class="card verdict">
+{{ result.strategic_verdict }}<br>
+Prescriptions:
+<ul>
+{% for p in result.prescriptions %}
+<li>{{ p }}</li>
+{% endfor %}
+</ul>
 </div>
 
 <div class="card">
@@ -175,45 +254,35 @@ body { font-family: Arial; background:#f3f4f6; padding:20px; }
 </div>
 {% endif %}
 
+</div>
+
 <script>
 {% if history %}
 new Chart(document.getElementById('chart'), {
     type: 'line',
     data: {
         labels: {{ labels|tojson }},
-        datasets: [{
-            label: 'Ω Coherence',
-            data: {{ history|tojson }},
-            tension: 0.3
-        }]
-    }
+        datasets: [{ label: 'Ω Coherence', data: {{ history|tojson }}, borderColor:'#2563eb', tension:0.3, fill:false }]
+    },
+    options: { responsive:true, maintainAspectRatio:false }
 });
 {% endif %}
 </script>
-
 </body>
 </html>
 """
 
-@app.route("/", methods=["GET", "POST"])
+@app.route('/', methods=['GET','POST'])
 def index():
-    if "history" not in session:
-        session["history"] = []
-
     result = None
-    if request.method == "POST":
-        text = request.form.get("text", "")
-        turn = len(session["history"]) + 1
-        result = engine.process(text, turn)
-        session["history"].append(result.omega_dyn)
+    if request.method=='POST':
+        user_text = request.form.get('text_input','')
+        if user_text:
+            result = engine.process(user_text)
+            history.append(result.omega_dyn)
+    labels = [f"Step {i+1}" for i in range(len(history))]
+    return render_template_string(TEMPLATE, result=result, history=history,
+                                  labels=labels, indicators=asdict(result) if result else None)
 
-    return render_template_string(
-        TEMPLATE,
-        result=result,
-        history=session["history"],
-        labels=[f"T{i+1}" for i in range(len(session["history"]))],
-    )
-
-
-if __name__ == "__main__":
+if __name__=="__main__":
     app.run(debug=True)
